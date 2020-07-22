@@ -438,7 +438,7 @@ struct connect_t
 
   template<class S, receiver_of R>
     requires (!has_custom_connect<S&&,R&&> and
-              !is_as_receiver_v<remove_cvref_t<R>, S> and
+              !is_as_receiver_v<remove_cvref_t<R>> and
               custom_executor_of<remove_cvref_t<S>, as_invocable<remove_cvref_t<R>, S>>
              )
   constexpr operation_state auto operator()(S&& s, R&& r) const
@@ -683,15 +683,13 @@ class as_sender
       : ex_(ex)
     {}
 
-    template<class R>
-      requires receiver_of<R>
+    template<receiver_of R>
     connect_result_t<E, R> connect(R&& r) &&
     {
       return execution::connect(std::move(ex_), std::forward<R>(r));
     }
 
-    template<class R>
-      requires receiver_of<R>
+    template<receiver_of R>
     connect_result_t<const E&, R> connect(R&& r) const &
     {
       return execution::connect(ex_, std::forward<R>(r));
