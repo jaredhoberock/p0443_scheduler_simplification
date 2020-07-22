@@ -116,9 +116,10 @@ struct execution_context
 
 
 static_assert(execution::executor<execution_context::executor_type>);
+static_assert(execution::scheduler<execution_context::executor_type>);
+static_assert(execution::sender<execution_context::executor_type>);
 static_assert(execution::scheduler<execution_context::scheduler_type>);
 static_assert(execution::sender<execution_context::scheduler_type::sender_type>);
-static_assert(execution::sender<execution_context::executor_type>);
 
 
 struct my_receiver
