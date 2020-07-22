@@ -527,24 +527,23 @@ struct submit_receiver
 struct submit_t
 {
   template<class S, class R>
-    requires has_submit_member_function<S&&,R&&>
+    requires sender_to<S,R> and has_submit_member_function<S&&,R&&>
   constexpr auto operator()(S&& s, R&& r) const noexcept(noexcept(std::forward<S>(s).submit(std::forward<R>(r))))
   {
     return std::forward<S>(s).submit(std::forward<R>(r));
   }
 
   template<class S, class R>
-    requires (!has_submit_member_function<S&&,R&&> and has_submit_free_function<S&&,R&&>)
+    requires sender_to<S,R> and (!has_submit_member_function<S&&,R&&> and has_submit_free_function<S&&,R&&>)
   constexpr auto operator()(S&& s, R&& r) const noexcept(noexcept(submit(std::forward<S>(s), std::forward<R>(r))))
   {
     return submit(std::forward<S>(s), std::forward<R>(r));
   }
 
   template<class S, class R>
-    requires(!has_submit_member_function<S&&,R&&> and !has_submit_member_function<S&&,R&&>)
+    requires sender_to<S,R> and (!has_submit_member_function<S&&,R&&> and !has_submit_member_function<S&&,R&&>)
   constexpr void operator()(S&& s, R&& r) const
   {
-
     execution::start((new submit_receiver<S, R>(std::forward<S>(s), std::forward<R>(r)))->state_);
   }
 };
