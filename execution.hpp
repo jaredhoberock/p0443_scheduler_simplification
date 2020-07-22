@@ -4,6 +4,7 @@
 #include <exception>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -84,6 +85,15 @@ struct set_error_t
   {
     return set_error(std::forward<R>(r), std::forward<E>(e));
   }
+
+  template<invocable R, class E>
+    requires (!has_set_error_free_function<R&&,E&&> and !has_set_error_free_function<R&&,E&&>)
+  constexpr void operator()(R&& r, E&&) const noexcept
+  {
+    // no-op
+    // XXX or should we rethrow?
+    //     or should we terminate?
+  }
 };
 
 
@@ -91,6 +101,75 @@ struct set_error_t
 
 
 constexpr detail::set_error_t set_error{};
+
+
+namespace detail
+{
+
+
+template<class E, class F>
+concept has_execute_member_function = requires(E&& e, F&& f) { std::forward<E>(e).execute(std::forward<F>(f)); };
+
+template<class E, class F>
+concept has_execute_free_function = requires(E&& e, F&& f) { execute(std::forward<E>(e), std::forward<F>(f)); };
+
+
+struct execute_t
+{
+  template<class E, class F>
+    requires has_execute_member_function<E&&,F&&>
+  constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(std::forward<E>(e).execute(std::forward<F>(f))))
+  {
+    return std::forward<E>(e).execute(std::forward<F>(f));
+  }
+
+  template<class E, class F>
+    requires (!has_execute_member_function<E&&,F&&> and has_execute_free_function<E&&,F&&>)
+  constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(execute(std::forward<E>(e), std::forward<F>(f))))
+  {
+    return execute(std::forward<E>(e), std::forward<F>(f));
+  }
+};
+
+
+} // end detail
+
+
+constexpr detail::execute_t execute{};
+
+
+namespace detail
+{
+
+
+template<class E, class F>
+concept executor_of_impl =
+  invocable<remove_cvref_t<F>&> and
+  constructible_from<remove_cvref_t<F>, F> and
+  move_constructible<remove_cvref_t<F>> and
+  copy_constructible<E> and
+  std::is_nothrow_copy_constructible_v<E> and
+  equality_comparable<E> and
+  requires(const E& e, F&& f)
+  {
+    execution::execute(e, std::forward<F>(f));
+  }
+;
+
+
+} // end detail
+
+
+struct invocable_archetype
+{
+  void operator()() noexcept;
+};
+
+template<class E>
+concept executor = detail::executor_of_impl<E, invocable_archetype>;
+
+template<class E, class F>
+concept executor_of = executor<E> and detail::executor_of_impl<E, F>;
 
 
 namespace detail
@@ -272,193 +351,28 @@ namespace detail
 {
 
 
-template<class E, class F>
-concept has_execute_member_function = requires(E&& e, F&& f) { std::forward<E>(e).execute(std::forward<F>(f)); };
-
-template<class E, class F>
-concept has_execute_free_function = requires(E&& e, F&& f) { execute(std::forward<E>(e), std::forward<F>(f)); };
-
-template<class E, class F>
-  requires has_execute_member_function<E&&,F&&>
-constexpr auto custom_execute(E&& e, F&& f) noexcept(noexcept(std::forward<E>(e).execute(std::forward<F>(f))))
-{
-  return std::forward<E>(e).execute(std::forward<F>(f));
-}
-
-template<class E, class F>
-  requires (!has_execute_member_function<E&&,F&&> and has_execute_free_function<E&&,F&&>)
-constexpr auto custom_execute(E&& e, F&& f) noexcept(noexcept(execute(std::forward<E>(e), std::forward<F>(f))))
-{
-  return execute(std::forward<E>(e), std::forward<F>(f));
-}
-
-template<class E, class F>
-concept has_custom_execute = requires(E&& e, F&& f) { detail::custom_execute(std::forward<E>(e), std::forward<F>(f)); };
-
-
-// XXX this awkwardness is for the default implementation of execution::connect, which
-//     makes executors automatically behave like senders of void
-//
-//     the purpose of distinguishing custom_executor_of from executor_of_impl is that custom_executor_of
-//     breaks the dependency cycle between execution::connect and execution::execute
-template<class E, class F>
-concept custom_executor_of =
-  invocable<remove_cvref_t<F>&> and
-  constructible_from<remove_cvref_t<F>, F> and
-  move_constructible<remove_cvref_t<F>> and
-  copy_constructible<E> and
-  std::is_nothrow_copy_constructible_v<E> and
-  equality_comparable<E> and
-  has_custom_execute<const E&, F>
-;
-
-
 template<class S, class R>
 concept has_connect_member_function = requires(S&& s, R&& r) { std::forward<S>(s).connect(std::forward<R>(r)); };
 
 template<class S, class R>
 concept has_connect_free_function = requires(S&& s, R&& r) { connect(std::forward<S>(s), std::forward<R>(r)); };
 
-template<class S, class R>
-  requires has_connect_member_function<S&&,R&&>
-constexpr operation_state auto custom_connect(S&& s, R&& r) noexcept(noexcept(std::forward<S>(s).connect(std::forward<R>(r))))
-{
-  return std::forward<S>(s).connect(std::forward<R>(r));
-}
-
-template<class S, class R>
-  requires (!has_connect_member_function<S&&,R&&> and has_connect_free_function<S&&,R&&>)
-constexpr operation_state auto custom_connect(S&& s, R&& r) noexcept(noexcept(connect(std::forward<S>(s), std::forward<R>(r))))
-{
-  return connect(std::forward<S>(s), std::forward<R>(r));
-}
-
-template<class S, class R>
-concept has_custom_connect = requires(S&& s, R&& r) { detail::custom_connect(std::forward<S>(s), std::forward<R>(r)); };
-
-
-// XXX this awkwardness is for the default implementation of execution::execute, which
-//     makes senders of void automatically behave like executors
-//
-//     the purpose of distinguishing custom_sender_to from sender_to is that custom_sender_to
-//     breaks the dependency cycle between execution::execute and execution::connect
-template<class S, class R>
-concept custom_sender_to =
-  sender<S> and
-  receiver<R> and
-  requires(S&& s, R&& r)
-  {
-    detail::custom_connect(std::forward<S>(s), std::forward<R>(r));
-  }
-;
-
-
-template<class R, class>
-struct as_invocable
-{
-  R* r_;
-
-  explicit as_invocable(R& r) noexcept
-    : r_(std::addressof(r))
-  {}
-
-  as_invocable(as_invocable&& other) noexcept
-    : r_(std::exchange(other.r_, nullptr))
-  {}
-
-  ~as_invocable()
-  {
-    if(r_)
-    {
-      // XXX indirection is pessimization
-      execution::set_done(std::move(*r_));
-    }
-  }
-
-  void operator()() & noexcept try
-  {
-    // XXX indirection is pessimization
-    execution::set_value(std::move(*r_));
-    r_ = nullptr;
-  }
-  catch(...)
-  {
-    // XXX indirection is pessimization
-    execution::set_error(std::move(*r_), std::current_exception());
-    r_ = nullptr;
-  }
-};
-
-template<class T>
-struct is_as_invocable : std::false_type {};
-
-template<class T, class U>
-struct is_as_invocable<as_invocable<T,U>> : std::true_type {};
-
-template<class T>
-inline constexpr bool is_as_invocable_v = is_as_invocable<T>::value;
-
-
-template<class F, class>
-struct as_receiver
-{
-  F f_;
-
-  void set_value() noexcept(std::is_nothrow_invocable_v<F&>)
-  {
-    std::invoke(f_);
-  }
-
-  [[noreturn]] void set_error(std::exception_ptr) noexcept
-  {
-    std::terminate();
-  }
-
-  void set_done() noexcept {}
-};
-
-template<class T>
-struct is_as_receiver : std::false_type {};
-
-template<class T, class U>
-struct is_as_receiver<as_receiver<T,U>> : std::true_type {};
-
-template<class T>
-inline constexpr bool is_as_receiver_v = is_as_receiver<T>::value;
 
 
 struct connect_t
 {
   template<sender S, class R>
-    requires has_custom_connect<S&&,R&&>
-  constexpr operation_state auto operator()(S&& s, R&& r) const noexcept(noexcept(detail::custom_connect(std::forward<S>(s), std::forward<R>(r))))
+    requires has_connect_member_function<S&&,R&&>
+  constexpr operation_state auto operator()(S&& s, R&& r) const noexcept(noexcept(std::forward<S>(s).connect(std::forward<R>(r))))
   {
-    return detail::custom_connect(std::forward<S>(s), std::forward<R>(r));
+    return std::forward<S>(s).connect(std::forward<R>(r));
   }
 
-  template<class S, receiver_of R>
-    requires (!has_custom_connect<S&&,R&&> and
-              !is_as_receiver_v<remove_cvref_t<R>> and
-              custom_executor_of<remove_cvref_t<S>, as_invocable<remove_cvref_t<R>, S>>
-             )
-  constexpr operation_state auto operator()(S&& s, R&& r) const
+  template<sender S, class R>
+    requires (!has_connect_member_function<S&&,R&&> and has_connect_free_function<S&&,R&&>)
+  constexpr operation_state auto operator()(S&& s, R&& r) const noexcept(noexcept(connect(std::forward<S>(s), std::forward<R>(r))))
   {
-    struct as_operation
-    {
-      remove_cvref_t<S> e_;
-      remove_cvref_t<R> r_;
-
-      void start() noexcept try
-      {
-        detail::custom_execute(std::move(e_), as_invocable<remove_cvref_t<R>, S>{r_});
-      }
-      catch(...)
-      {
-        execution::set_error(std::move(r_), std::current_exception());
-      }
-    };
-
-    return as_operation{std::forward<S>(s), std::forward<R>(r)};
+    return connect(std::forward<S>(s), std::forward<R>(r));
   }
 };
 
@@ -568,107 +482,17 @@ namespace detail
 {
 
 
-struct execute_t
-{
-  template<class E, class F>
-    requires custom_executor_of<remove_cvref_t<E&&>,F&&>
-  constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(detail::custom_execute(std::forward<E>(e), std::forward<F>(f))))
-  {
-    return detail::custom_execute(std::forward<E>(e), std::forward<F>(f));
-  }
-
-  template<class E, class F>
-    requires(!custom_executor_of<remove_cvref_t<E&&>,F&&> and
-             !is_as_invocable_v<remove_cvref_t<F>> and
-             invocable<remove_cvref_t<F>&> and
-             custom_sender_to<E, as_receiver<remove_cvref_t<F>, E>>
-            )
-  constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(execution::submit(std::forward<E>(e), as_receiver<remove_cvref_t<F>, E>{std::forward<F>(f)})))
-  {
-    return execution::submit(std::forward<E>(e), as_receiver<remove_cvref_t<F>, E>{std::forward<F>(f)});
-  }
-};
-
-
-} // end detail
-
-
-constexpr detail::execute_t execute{};
-
-
-namespace detail
-{
-
-
-template<class E, class F>
-concept executor_of_impl =
-  invocable<remove_cvref_t<F>&> and
-  constructible_from<remove_cvref_t<F>, F> and
-  move_constructible<remove_cvref_t<F>> and
-  copy_constructible<E> and
-  std::is_nothrow_copy_constructible_v<E> and
-  equality_comparable<E> and
-  requires(const E& e, F&& f)
-  {
-    execution::execute(e, std::forward<F>(f));
-  }
-;
-
-
-struct void_receiver
-{
-  void set_value() noexcept;
-  void set_error(std::exception_ptr) noexcept;
-  void set_done() noexcept;
-};
-
-
-// XXX this specialization allows executors to automatically behave like sender of void
-template<class S>
-  requires executor_of_impl<S, as_invocable<void_receiver, S>>
-struct sender_traits_base<S>
-{
-  template<template<class...> class Tuple, template<class...> class Variant>
-  using value_types = Variant<Tuple<>>;
-
-  template<template<class...> class Variant>
-  using error_types = Variant<std::exception_ptr>;
-
-  static constexpr bool sends_done = true;
-};
-
-
-} // end detail
-
-
-struct invocable_archetype
-{
-  void operator()() noexcept;
-};
-
-
-template<class E>
-concept executor = detail::executor_of_impl<E, invocable_archetype>;
-
-template<class E, class F>
-concept executor_of = executor<E> and detail::executor_of_impl<E, F>;
-
-
-namespace detail
-{
-
-
 template<class S>
 concept has_schedule_member_function = requires(S&& s) { std::forward<S>(s).schedule(); };
 
 template<class S>
 concept has_schedule_free_function = requires(S&& s) { schedule(std::forward<S>(s)); };
 
-template<class E>
+template<executor Ex>
 class as_sender
 {
   private:
-    E ex_;
+    Ex ex_;
 
   public:
     template<template<class...> class Tuple, template<class...> class Variant>
@@ -679,22 +503,87 @@ class as_sender
 
     static constexpr bool sends_done = true;
 
-    explicit as_sender(E ex) noexcept
+    explicit as_sender(Ex ex) noexcept
       : ex_(ex)
     {}
 
     template<receiver_of R>
-    connect_result_t<E, R> connect(R&& r) &&
+    struct operation
     {
-      return execution::connect(std::move(ex_), std::forward<R>(r));
+      using receiver_type = remove_cvref_t<R>;
+
+      Ex ex_;
+      receiver_type r_;
+
+      struct as_invocable
+      {
+        std::optional<receiver_type> r_;
+
+        as_invocable(receiver_type&& r)
+          : r_{std::move(r)}
+        {}
+
+        as_invocable(as_invocable&& other) noexcept
+          : r_{std::move(other.r_)}
+        {
+          other.r_.reset();
+        }
+
+        ~as_invocable()
+        {
+          if(r_)
+          {
+            execution::set_done(std::move(*r_));
+          }
+        }
+
+        template<class E>
+        void set_error(E&& e) & noexcept
+        {
+          execution::set_error(std::move(*r_), std::forward<E>(e));
+          r_.reset();
+        }
+
+        void operator()() & noexcept
+        {
+          try
+          {
+            execution::set_value(std::move(*r_));
+            r_.reset();
+          }
+          catch(...)
+          {
+            set_error(std::current_exception());
+          }
+        }
+      };
+
+      void start() noexcept
+      {
+        try
+        {
+          execution::execute(ex_, as_invocable{std::move(r_)});
+        }
+        catch(...)
+        {
+          execution::set_error(std::move(r_), std::current_exception());
+        }
+      }
+    };
+
+    template<receiver_of R>
+    operation<R> connect(R&& r) &&
+    {
+      return {ex_, std::forward<R>(r)};
     }
 
     template<receiver_of R>
-    connect_result_t<const E&, R> connect(R&& r) const &
+    connect_result_t<const Ex&, R> connect(R&& r) const &
     {
       return execution::connect(ex_, std::forward<R>(r));
     }
 };
+
 
 struct schedule_t
 {
@@ -725,17 +614,6 @@ struct schedule_t
 
 
 constexpr detail::schedule_t schedule{};
-
-
-template<class S>
-concept scheduler = 
-  copy_constructible<remove_cvref_t<S>> and
-  equality_comparable<remove_cvref_t<S>> and
-  requires(S&& s)
-  {
-    execution::schedule(std::forward<S>(s));
-  }
-;
 
 
 } // end execution

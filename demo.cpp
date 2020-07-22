@@ -1,31 +1,42 @@
 // $ clang-10 -std=c++20 demo.cpp -lstdc++
 
+#include <iostream>
 #include <exception>
 #include "execution.hpp"
 #include <iostream>
 #include <utility>
 
 
+template<class T>
+concept can_set_error = requires(T&& t) { execution::set_error(std::forward<T>(t)); };
+
+
+template<class F, class... Args>
+  requires (invocable<F&&,Args&&...> and !can_set_error<F&&>)
+auto invoke_or_set_error(F&& f, Args&&... args) noexcept
+{
+  return std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
+}
+
+template<class F, class... Args>
+  requires (invocable<F&&,Args&&...> and can_set_error<F&&>)
+auto invoke_or_set_error(F&& f, Args&&... args) noexcept try
+{
+  return std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
+}
+catch(...)
+{
+  execution::set_error(std::forward<F>(f), std::current_exception());
+}
+
+
 struct execution_context
 {
   template<class F>
     requires invocable<F&>
-  void execute_invocable(F f) const
+  void execute_invocable(F f) const noexcept
   {
-    std::invoke(f);
-  }
-
-  template<execution::receiver_of R>
-  void submit_receiver(R&& r) const
-  {
-    try
-    {
-      execution::set_value(std::move(r));
-    }
-    catch(...)
-    {
-      execution::set_error(std::move(r), std::current_exception());
-    }
+    invoke_or_set_error(f);
   }
 
 
@@ -35,7 +46,7 @@ struct execution_context
 
     template<class F>
       requires invocable<F&>
-    void execute(F&& f) const
+    void execute(F&& f) const noexcept
     {
       context_.execute_invocable(std::forward<F>(f));
     }
@@ -55,71 +66,10 @@ struct execution_context
   {
     return {*this};
   }
-
-
-  struct scheduler_type
-  {
-    const execution_context& context_;
-
-    struct sender_type
-    {
-      template<template<class...> class Tuple, template<class...> class Variant>
-      using value_types = Variant<Tuple<>>;
-
-      template<template<class...> class Variant>
-      using error_types = Variant<std::exception_ptr>;
-
-      static constexpr bool sends_done = true;
-
-      const execution_context& context_;
-
-      template<execution::receiver_of R> 
-      struct operation
-      {
-        const execution_context& context_;
-        remove_cvref_t<R> receiver_;
-
-        void start() noexcept
-        {
-          context_.submit_receiver(std::move(receiver_));
-        }
-      };
-
-      template<execution::receiver_of R>
-      operation<R> connect(R&& r) const
-      {
-        return {context_, std::forward<R>(r)};
-      }
-    };
-
-    sender_type schedule() const
-    {
-      return {context_};
-    }
-
-    friend bool operator==(const scheduler_type& a, const scheduler_type& b)
-    {
-      return &a.context_ == &b.context_;
-    }
-
-    friend bool operator!=(const scheduler_type& a, const scheduler_type& b)
-    {
-      return !(a == b);
-    }
-  };
-
-  scheduler_type scheduler() const
-  {
-    return {*this};
-  }
 };
 
 
 static_assert(execution::executor<execution_context::executor_type>);
-static_assert(execution::scheduler<execution_context::executor_type>);
-static_assert(execution::sender<execution_context::executor_type>);
-static_assert(execution::scheduler<execution_context::scheduler_type>);
-static_assert(execution::sender<execution_context::scheduler_type::sender_type>);
 
 
 struct my_receiver
@@ -142,7 +92,6 @@ struct my_receiver
 };
 
 static_assert(execution::is_nothrow_receiver_of_v<my_receiver>);
-static_assert(execution::operation_state<execution_context::scheduler_type::sender_type::operation<my_receiver>>);
 
 
 int main()
@@ -160,26 +109,20 @@ int main()
   }
 
   {
-    auto sched = ctx.scheduler();
-
-    // submit a receiver on the scheduler
-    execution::submit(execution::schedule(sched), my_receiver{});
-  }
-
-  {
     auto ex = ctx.executor();
 
-    // treat the executor like a scheduler
-    execution::submit(execution::schedule(ex), my_receiver{});
+    // schedule a receiver on the executor
+    auto lazy_op = execution::connect(execution::schedule(ex), my_receiver{});
+
+    execution::start(lazy_op);
   }
 
-  {
-    auto ex = ctx.executor();
+  //{
+  //  auto ex = ctx.executor();
 
-    // treat the executor like a sender of void
-    // XXX undesirable
-    execution::submit(ex, my_receiver{});
-  }
+  //  // ERROR: treat the executor like a sender of void
+  //  execution::submit(ex, my_receiver{});
+  //}
 
   return 0;
 }
