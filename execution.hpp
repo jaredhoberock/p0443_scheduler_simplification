@@ -562,14 +562,14 @@ namespace detail
 struct execute_t
 {
   template<class E, class F>
-    requires custom_executor_of<E&&,F&&>
+    requires custom_executor_of<remove_cvref_t<E&&>,F&&>
   constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(detail::custom_execute(std::forward<E>(e), std::forward<F>(f))))
   {
     return detail::custom_execute(std::forward<E>(e), std::forward<F>(f));
   }
 
   template<class E, class F>
-    requires(!has_custom_execute<E&&,F&&> and
+    requires(!custom_executor_of<remove_cvref_t<E&&>,F&&> and
              !is_as_invocable_v<remove_cvref_t<F>> and
              invocable<remove_cvref_t<F>&> and
              custom_sender_to<E, as_receiver<remove_cvref_t<F>, E>>
