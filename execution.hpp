@@ -296,6 +296,11 @@ template<class E, class F>
 concept has_custom_execute = requires(E&& e, F&& f) { detail::custom_execute(std::forward<E>(e), std::forward<F>(f)); };
 
 
+// XXX this awkwardness is for the default implementation of execution::connect, which
+//     makes executors act like senders of void
+//
+//     the purpose of distinguishing custom_executor_of from executor_of_impl is that custom_executor_of
+//     breaks the dependency cycle between execution::connect and execution::execute
 template<class E, class F>
 concept custom_executor_of =
   invocable<remove_cvref_t<F>&> and
@@ -332,6 +337,11 @@ template<class S, class R>
 concept has_custom_connect = requires(S&& s, R&& r) { detail::custom_connect(std::forward<S>(s), std::forward<R>(r)); };
 
 
+// XXX this awkwardness is for the default implementation of execution::execute, which
+//     makes senders of void act like executors
+//
+//     the purpose of distinguishing custom_sender_to from sender_to is that custom_sender_to
+//     breaks the dependency cycle between execution::execute and execution::connect
 template<class S, class R>
 concept custom_sender_to =
   sender<S> and
@@ -612,6 +622,8 @@ struct void_receiver
   void set_done() noexcept;
 };
 
+
+// XXX this specialization allows executors to behave like sender of void
 template<class S>
   requires executor_of_impl<S, as_invocable<void_receiver, S>>
 struct sender_traits_base<S>
@@ -631,7 +643,7 @@ struct sender_traits_base<S>
 
 struct invocable_archetype
 {
-  void operator()();
+  void operator()() noexcept;
 };
 
 
