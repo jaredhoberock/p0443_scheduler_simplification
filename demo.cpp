@@ -145,9 +145,16 @@ int main()
 {
   execution_context ctx;
 
-  auto s = ctx.scheduler();
+  {
+    execution::execute(ctx.executor(), []
+    {
+      std::cout << "lambda" << std::endl;
+    });
+  }
 
-  execution::submit(execution::schedule(s), my_receiver{});
+  {
+    execution::submit(execution::schedule(ctx.scheduler()), my_receiver{});
+  }
 
   return 0;
 }
