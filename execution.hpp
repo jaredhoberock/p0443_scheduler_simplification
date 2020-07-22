@@ -297,7 +297,7 @@ concept has_custom_execute = requires(E&& e, F&& f) { detail::custom_execute(std
 
 
 // XXX this awkwardness is for the default implementation of execution::connect, which
-//     makes executors act like senders of void
+//     makes executors automatically behave like senders of void
 //
 //     the purpose of distinguishing custom_executor_of from executor_of_impl is that custom_executor_of
 //     breaks the dependency cycle between execution::connect and execution::execute
@@ -338,7 +338,7 @@ concept has_custom_connect = requires(S&& s, R&& r) { detail::custom_connect(std
 
 
 // XXX this awkwardness is for the default implementation of execution::execute, which
-//     makes senders of void act like executors
+//     makes senders of void automatically behave like executors
 //
 //     the purpose of distinguishing custom_sender_to from sender_to is that custom_sender_to
 //     breaks the dependency cycle between execution::execute and execution::connect
@@ -623,7 +623,7 @@ struct void_receiver
 };
 
 
-// XXX this specialization allows executors to behave like sender of void
+// XXX this specialization allows executors to automatically behave like sender of void
 template<class S>
   requires executor_of_impl<S, as_invocable<void_receiver, S>>
 struct sender_traits_base<S>
@@ -664,20 +664,61 @@ concept has_schedule_member_function = requires(S&& s) { std::forward<S>(s).sche
 template<class S>
 concept has_schedule_free_function = requires(S&& s) { schedule(std::forward<S>(s)); };
 
+template<class E>
+class as_sender
+{
+  private:
+    E ex_;
+
+  public:
+    template<template<class...> class Tuple, template<class...> class Variant>
+    using value_types = Variant<Tuple<>>;
+
+    template<template<class...> class Variant>
+    using error_types = Variant<std::exception_ptr>;
+
+    static constexpr bool sends_done = true;
+
+    explicit as_sender(E ex) noexcept
+      : ex_(ex)
+    {}
+
+    template<class R>
+      requires receiver_of<R>
+    connect_result_t<E, R> connect(R&& r) &&
+    {
+      return execution::connect(std::move(ex_), std::forward<R>(r));
+    }
+
+    template<class R>
+      requires receiver_of<R>
+    connect_result_t<const E&, R> connect(R&& r) const &
+    {
+      return execution::connect(ex_, std::forward<R>(r));
+    }
+};
+
 struct schedule_t
 {
   template<class S>
     requires has_schedule_member_function<S&&>
-  constexpr auto operator()(S&& s) const noexcept(noexcept(std::forward<S>(s).schedule()))
+  constexpr sender auto operator()(S&& s) const noexcept(noexcept(std::forward<S>(s).schedule()))
   {
     return std::forward<S>(s).schedule();
   }
 
   template<class S>
     requires (!has_schedule_member_function<S&&> and has_schedule_free_function<S&&>)
-  constexpr auto operator()(S&& s) const noexcept(noexcept(schedule(std::forward<S>(s))))
+  constexpr sender auto operator()(S&& s) const noexcept(noexcept(schedule(std::forward<S>(s))))
   {
     return schedule(std::forward<S>(s));
+  }
+
+  template<executor S>
+    requires (!has_schedule_free_function<S&&> and !has_schedule_free_function<S&&>)
+  constexpr sender auto operator()(S&& s) const
+  {
+    return as_sender<remove_cvref_t<S>>{std::forward<S>(s)};
   }
 };
 
