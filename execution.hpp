@@ -19,6 +19,75 @@ namespace detail
 {
 
 
+template<class E, class F>
+concept has_execute_member_function = requires(E&& e, F&& f) { std::forward<E>(e).execute(std::forward<F>(f)); };
+
+template<class E, class F>
+concept has_execute_free_function = requires(E&& e, F&& f) { execute(std::forward<E>(e), std::forward<F>(f)); };
+
+
+struct execute_t
+{
+  template<class E, class F>
+    requires has_execute_member_function<E&&,F&&>
+  constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(std::forward<E>(e).execute(std::forward<F>(f))))
+  {
+    return std::forward<E>(e).execute(std::forward<F>(f));
+  }
+
+  template<class E, class F>
+    requires (!has_execute_member_function<E&&,F&&> and has_execute_free_function<E&&,F&&>)
+  constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(execute(std::forward<E>(e), std::forward<F>(f))))
+  {
+    return execute(std::forward<E>(e), std::forward<F>(f));
+  }
+};
+
+
+} // end detail
+
+
+constexpr detail::execute_t execute{};
+
+
+namespace detail
+{
+
+
+template<class E, class F>
+concept executor_of_impl =
+  invocable<remove_cvref_t<F>&> and
+  constructible_from<remove_cvref_t<F>, F> and
+  move_constructible<remove_cvref_t<F>> and
+  copy_constructible<E> and
+  std::is_nothrow_copy_constructible_v<E> and
+  equality_comparable<E> and
+  requires(const E& e, F&& f)
+  {
+    execution::execute(e, std::forward<F>(f));
+  }
+;
+
+
+} // end detail
+
+
+struct invocable_archetype
+{
+  void operator()() noexcept;
+};
+
+template<class E>
+concept executor = detail::executor_of_impl<E, invocable_archetype>;
+
+template<class E, class F>
+concept executor_of = executor<E> and detail::executor_of_impl<E, F>;
+
+
+namespace detail
+{
+
+
 template<class O>
 concept has_start_member_function = requires(O&& o) { std::forward<O>(o).start(); };
 
@@ -85,15 +154,6 @@ struct set_error_t
   {
     return set_error(std::forward<R>(r), std::forward<E>(e));
   }
-
-  template<invocable R, class E>
-    requires (!has_set_error_free_function<R&&,E&&> and !has_set_error_free_function<R&&,E&&>)
-  constexpr void operator()(R&& r, E&&) const noexcept
-  {
-    // no-op
-    // XXX or should we rethrow?
-    //     or should we terminate?
-  }
 };
 
 
@@ -101,75 +161,6 @@ struct set_error_t
 
 
 constexpr detail::set_error_t set_error{};
-
-
-namespace detail
-{
-
-
-template<class E, class F>
-concept has_execute_member_function = requires(E&& e, F&& f) { std::forward<E>(e).execute(std::forward<F>(f)); };
-
-template<class E, class F>
-concept has_execute_free_function = requires(E&& e, F&& f) { execute(std::forward<E>(e), std::forward<F>(f)); };
-
-
-struct execute_t
-{
-  template<class E, class F>
-    requires has_execute_member_function<E&&,F&&>
-  constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(std::forward<E>(e).execute(std::forward<F>(f))))
-  {
-    return std::forward<E>(e).execute(std::forward<F>(f));
-  }
-
-  template<class E, class F>
-    requires (!has_execute_member_function<E&&,F&&> and has_execute_free_function<E&&,F&&>)
-  constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(execute(std::forward<E>(e), std::forward<F>(f))))
-  {
-    return execute(std::forward<E>(e), std::forward<F>(f));
-  }
-};
-
-
-} // end detail
-
-
-constexpr detail::execute_t execute{};
-
-
-namespace detail
-{
-
-
-template<class E, class F>
-concept executor_of_impl =
-  invocable<remove_cvref_t<F>&> and
-  constructible_from<remove_cvref_t<F>, F> and
-  move_constructible<remove_cvref_t<F>> and
-  copy_constructible<E> and
-  std::is_nothrow_copy_constructible_v<E> and
-  equality_comparable<E> and
-  requires(const E& e, F&& f)
-  {
-    execution::execute(e, std::forward<F>(f));
-  }
-;
-
-
-} // end detail
-
-
-struct invocable_archetype
-{
-  void operator()() noexcept;
-};
-
-template<class E>
-concept executor = detail::executor_of_impl<E, invocable_archetype>;
-
-template<class E, class F>
-concept executor_of = executor<E> and detail::executor_of_impl<E, F>;
 
 
 namespace detail
