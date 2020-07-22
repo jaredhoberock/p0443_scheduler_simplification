@@ -8,10 +8,11 @@
 
 struct execution_context
 {
-  template<invocable F>
-  void execute_invocable(F&& f) const
+  template<class F>
+    requires invocable<F&>
+  void execute_invocable(F f) const
   {
-    std::invoke(std::forward<F>(f));
+    std::invoke(f);
   }
 
   template<execution::receiver_of R>
@@ -32,7 +33,8 @@ struct execution_context
   {
     const execution_context& context_;
 
-    template<invocable F>
+    template<class F>
+      requires invocable<F&>
     void execute(F&& f) const
     {
       context_.execute_invocable(std::forward<F>(f));
@@ -116,6 +118,7 @@ struct execution_context
 static_assert(execution::executor<execution_context::executor_type>);
 static_assert(execution::scheduler<execution_context::scheduler_type>);
 static_assert(execution::sender<execution_context::scheduler_type::sender_type>);
+static_assert(execution::sender<execution_context::executor_type>);
 
 
 struct my_receiver
@@ -146,14 +149,35 @@ int main()
   execution_context ctx;
 
   {
-    execution::execute(ctx.executor(), []
+    auto ex = ctx.executor();
+
+    // execute a lambda on the executor
+    execution::execute(ex, []
     {
       std::cout << "lambda" << std::endl;
     });
   }
 
   {
-    execution::submit(execution::schedule(ctx.scheduler()), my_receiver{});
+    auto sched = ctx.scheduler();
+
+    // submit a receiver on the scheduler
+    execution::submit(execution::schedule(sched), my_receiver{});
+  }
+
+  {
+    auto ex = ctx.executor();
+
+    // treat the executor like a scheduler
+    execution::submit(execution::schedule(ex), my_receiver{});
+  }
+
+  {
+    auto ex = ctx.executor();
+
+    // treat the executor like a sender of void
+    // XXX undesirable
+    execution::submit(ex, my_receiver{});
   }
 
   return 0;
