@@ -8,7 +8,7 @@ Currently, concepts `executor` and `scheduler` are "peers". Both are usable with
 
 Proposal Summary:
 * Allow `executor`s to optionally `execute` `receiver`s of `void` directly, in addition to nullary `invocable`s. Executors which natively `execute` a `receiver` must fulfill the `receiver` contract.
-* If an `executor` cannot natively `execute` a `receiver`, `execution::execute` always performs a fallback adaptation. This makes all `executor`s of `invocable`s also able to execute `receiver`s of `void`.
+* If an `executor` cannot natively `execute` a `receiver`, `execution::execute(ex, receiver)` always performs a fallback adaptation. This makes all `executor`s of `invocable`s also able to execute `receiver`s of `void`.
 * When executing an `invocable`, normatively encourage `executor`s to report errors and cancellation to the invocable via `execution::set_error` and `execution::set_done`, thus providing optional error reporting channels executors currently lack.
 * Eliminate `scheduler`. `execution::scheduler` works exactly as before, but accepts an `executor`.
 
