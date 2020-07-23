@@ -177,7 +177,7 @@ int main()
     auto ex = ctx.executor();
 
     // treat the executor like a sender of void
-    // XXX undesirable
+    // XXX some reviewers perceive this automatic adaptation as undesirable
     execution::submit(ex, my_receiver{});
   }
 
