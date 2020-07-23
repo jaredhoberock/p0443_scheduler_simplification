@@ -7,10 +7,6 @@
 #include <utility>
 
 
-template<class T>
-concept can_set_error = requires(T&& t) { execution::set_error(std::forward<T>(t)); };
-
-
 struct execution_context
 {
   template<class F>
