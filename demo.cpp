@@ -11,32 +11,13 @@ template<class T>
 concept can_set_error = requires(T&& t) { execution::set_error(std::forward<T>(t)); };
 
 
-template<class F, class... Args>
-  requires (invocable<F&&,Args&&...> and !can_set_error<F&&>)
-auto invoke_or_set_error(F&& f, Args&&... args) noexcept
-{
-  return std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
-}
-
-template<class F, class... Args>
-  requires (invocable<F&&,Args&&...> and can_set_error<F&&>)
-auto invoke_or_set_error(F&& f, Args&&... args) noexcept try
-{
-  return std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
-}
-catch(...)
-{
-  execution::set_error(std::forward<F>(f), std::current_exception());
-}
-
-
 struct execution_context
 {
   template<class F>
     requires invocable<F&>
   void execute_invocable(F f) const noexcept
   {
-    invoke_or_set_error(f);
+    std::invoke(f);
   }
 
 
@@ -92,6 +73,7 @@ struct my_receiver
 };
 
 static_assert(execution::is_nothrow_receiver_of_v<my_receiver>);
+static_assert(execution::executor_of<execution_context::executor_type, my_receiver>);
 
 
 int main()
@@ -106,6 +88,13 @@ int main()
     {
       std::cout << "lambda" << std::endl;
     });
+  }
+
+  {
+    auto ex = ctx.executor();
+
+    // NEW: execute a receiver on the executor
+    execution::execute(ex, my_receiver{});
   }
 
   {

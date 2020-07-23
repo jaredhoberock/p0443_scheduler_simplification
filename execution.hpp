@@ -19,120 +19,6 @@ namespace detail
 {
 
 
-template<class E, class F>
-concept has_execute_member_function = requires(E&& e, F&& f) { std::forward<E>(e).execute(std::forward<F>(f)); };
-
-template<class E, class F>
-concept has_execute_free_function = requires(E&& e, F&& f) { execute(std::forward<E>(e), std::forward<F>(f)); };
-
-
-struct execute_t
-{
-  template<class E, class F>
-    requires has_execute_member_function<E&&,F&&>
-  constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(std::forward<E>(e).execute(std::forward<F>(f))))
-  {
-    return std::forward<E>(e).execute(std::forward<F>(f));
-  }
-
-  template<class E, class F>
-    requires (!has_execute_member_function<E&&,F&&> and has_execute_free_function<E&&,F&&>)
-  constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(execute(std::forward<E>(e), std::forward<F>(f))))
-  {
-    return execute(std::forward<E>(e), std::forward<F>(f));
-  }
-};
-
-
-} // end detail
-
-
-constexpr detail::execute_t execute{};
-
-
-namespace detail
-{
-
-
-template<class E, class F>
-concept executor_of_impl =
-  invocable<remove_cvref_t<F>&> and
-  constructible_from<remove_cvref_t<F>, F> and
-  move_constructible<remove_cvref_t<F>> and
-  copy_constructible<E> and
-  std::is_nothrow_copy_constructible_v<E> and
-  equality_comparable<E> and
-  requires(const E& e, F&& f)
-  {
-    execution::execute(e, std::forward<F>(f));
-  }
-;
-
-
-} // end detail
-
-
-struct invocable_archetype
-{
-  void operator()() noexcept;
-};
-
-template<class E>
-concept executor = detail::executor_of_impl<E, invocable_archetype>;
-
-template<class E, class F>
-concept executor_of = executor<E> and detail::executor_of_impl<E, F>;
-
-
-namespace detail
-{
-
-
-template<class O>
-concept has_start_member_function = requires(O&& o) { std::forward<O>(o).start(); };
-
-template<class O>
-concept has_start_free_function = requires(O&& o) { start(std::forward<O>(o)); };
-
-struct start_t
-{
-  template<class O>
-    requires has_start_member_function<O&&>
-  constexpr auto operator()(O&& o) const noexcept(noexcept(std::forward<O>(o).start()))
-  {
-    return std::forward<O>(o).start();
-  }
-
-  template<class O>
-    requires (!has_start_member_function<O&&> and has_start_free_function<O&&>)
-  constexpr auto operator()(O&& o) const noexcept(noexcept(start(std::forward<O>(o))))
-  {
-    return start(std::forward<O>(o));
-  }
-};
-
-
-} // end detail
-
-
-constexpr detail::start_t start{};
-
-
-template<class O>
-concept operation_state =
-  destructible<O> and
-  std::is_object_v<O> and
-  requires(O& o)
-  {
-    { execution::start(o) } noexcept;
-  }
-;
-
-
-namespace detail
-{
-
-
 template<class R, class E>
 concept has_set_error_member_function = requires(R&& r, E&& e) { std::forward<R>(r).set_error(std::forward<E>(e)); };
 
@@ -257,6 +143,296 @@ template<class R, class... An>
 inline constexpr bool is_nothrow_receiver_of_v =
   receiver_of<R,An...> and
   std::is_nothrow_invocable_v<decltype(set_value), R, An...>
+;
+
+
+namespace detail
+{
+
+
+template<class E, class F>
+concept has_noexcept_execute_member_function =
+  requires(E&& e, F&& f)
+  {
+    { std::forward<E>(e).execute(std::forward<F>(f)) } noexcept;
+  }
+;
+
+template<class E, class F>
+concept has_execute_member_function =
+  has_noexcept_execute_member_function<E,F> or
+  requires(E&& e, F&& f)
+  {
+    std::forward<E>(e).execute(std::forward<F>(f));
+  }
+;
+
+
+template<class E, class F>
+concept has_noexcept_execute_free_function =
+  requires(E&& e, F&& f)
+  {
+    { execute(std::forward<E>(e), std::forward<F>(f)) } noexcept;
+  }
+;
+
+template<class E, class F>
+concept has_execute_free_function =
+  has_noexcept_execute_free_function<E,F> or
+  requires(E&& e, F&& f)
+  {
+    execute(std::forward<E>(e), std::forward<F>(f));
+  }
+;
+
+
+template<receiver_of R>
+struct as_invocable_receiver
+{
+  using receiver_type = remove_cvref_t<R>;
+  std::optional<receiver_type> r_;
+
+  as_invocable_receiver(receiver_type&& r)
+    : r_{std::move(r)}
+  {}
+
+  as_invocable_receiver(as_invocable_receiver&& other) noexcept
+    : r_{std::move(other.r_)}
+  {
+    other.r_.reset();
+  }
+
+  ~as_invocable_receiver()
+  {
+    if(r_)
+    {
+      std::move(*this).set_done();
+    }
+  }
+
+  void set_value() &&
+  {
+    execution::set_value(std::move(*r_));
+    r_.reset();
+  }
+
+  template<class E>
+  void set_error(E&& e) && noexcept
+  {
+    execution::set_error(std::move(*r_), std::forward<E>(e));
+    r_.reset();
+  }
+
+  void set_done() && noexcept
+  {
+    execution::set_done(std::move(*r_));
+    r_.reset();
+  }
+
+  void operator()() & noexcept
+  {
+    try
+    {
+      std::move(*this).set_value();
+    }
+    catch(...)
+    {
+      std::move(*this).set_error(std::current_exception());
+    }
+  }
+};
+
+
+struct execute_t
+{
+  // receiver case 1: try ex.execute(receiver) noexcept
+  template<class E, receiver_of R>
+    requires has_noexcept_execute_member_function<E&&,R&&>
+  constexpr auto operator()(E&& e, R&& r) const noexcept
+  {
+    return std::forward<E>(e).execute(std::forward<R>(r));
+  }
+
+  // receiver case 2: try execute(ex, receiver) noexcept
+  template<class E, receiver_of R>
+    requires (!has_noexcept_execute_member_function<E&&,R&&> and has_noexcept_execute_free_function<E&&,R&&>)
+  constexpr auto operator()(E&& e, R&& r) const noexcept
+  {
+    return execute(std::forward<E>(e), std::forward<R>(r));
+  }
+
+  // receiver case 3: try ex.execute(receiver)
+  template<class E, receiver_of R>
+    requires has_execute_member_function<E&&,R&&>
+  constexpr auto operator()(E&& e, R&& r) const noexcept try
+  {
+    return std::forward<E>(e).execute(std::forward<R>(r));
+  }
+  catch(...)
+  {
+    execution::set_error(std::forward<R>(r), std::current_exception());
+  }
+
+  // receiver case 4: try execute(ex, receiver)
+  template<class E, receiver_of R>
+    requires (!has_execute_member_function<E&&,R&&> and has_execute_free_function<E&&,R&&>)
+  constexpr auto operator()(E&& e, R&& r) const noexcept try
+  {
+    return execute(std::forward<E>(e), std::forward<R>(r));
+  }
+  catch(...)
+  {
+    execution::set_error(std::forward<R>(r), std::current_exception());
+  }
+
+  // receiver case 5: try ex.execute(as_invocable_receiver(receiver))
+  template<class E, receiver_of R>
+    requires (!has_execute_member_function<E&&,R&&> and
+              !has_execute_free_function<E&&,R&&> and
+              has_execute_member_function<E&&,as_invocable_receiver<R&&>>
+             )
+  constexpr auto operator()(E&& e, R&& r) const noexcept try
+  {
+    return std::forward<E>(e).execute(as_invocable_receiver<R&&>{std::forward<R>(r)});
+  }
+  catch(...)
+  {
+    execution::set_error(std::forward<R>(r), std::current_exception());
+  }
+
+  // receiver case 6: try execute(ex, as_invocable_receiver(receiver))
+  template<class E, receiver_of R>
+    requires (!has_execute_member_function<E&&,R&&> and
+              !has_execute_free_function<E&&,R&&> and
+              !has_execute_member_function<E&&,as_invocable_receiver<R&&>> and
+              has_execute_free_function<E&&,as_invocable_receiver<R&&>>
+             )
+  constexpr auto operator()(E&& e, R&& r) const noexcept try
+  {
+    return execute(std::forward<E>(e), as_invocable_receiver<R&&>{std::forward<R>(r)});
+  }
+  catch(...)
+  {
+    execution::set_error(std::forward<R>(r), std::current_exception());
+  }
+
+
+  // invocable case 1: try ex.execute(invocable)
+  template<class E, class F>
+    requires (not receiver_of<F> and has_execute_member_function<E&&,F&&>)
+  constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(std::forward<E>(e).execute(std::forward<F>(f))))
+  {
+    return std::forward<E>(e).execute(std::forward<F>(f));
+  }
+
+  // invocable case 2: try execute(ex, invocable)
+  template<class E, class F>
+    requires (not receiver_of<F> and !has_execute_member_function<E&&,F&&> and has_execute_free_function<E&&,F&&>)
+  constexpr auto operator()(E&& e, F&& f) const noexcept(noexcept(execute(std::forward<E>(e), std::forward<F>(f))))
+  {
+    return execute(std::forward<E>(e), std::forward<F>(f));
+  }
+};
+
+
+} // end detail
+
+
+constexpr detail::execute_t execute{};
+
+
+namespace detail
+{
+
+
+template<class E, class F>
+concept executable_invocable =
+  invocable<remove_cvref_t<F>&> and
+  constructible_from<remove_cvref_t<F>, F> and
+  move_constructible<remove_cvref_t<F>> and
+  requires(const E& e, F&& f)
+  {
+    execution::execute(e, std::forward<F>(f));
+  }
+;
+
+
+template<class E, class R>
+concept executable_receiver =
+  receiver_of<R> and
+  requires(const E& e, remove_cvref_t<R>&& r)
+  {
+    { execution::execute(e, std::move(r)) } noexcept;
+  }
+;
+
+
+template<class E, class T>
+concept executor_of_impl =
+  copy_constructible<E> and
+  std::is_nothrow_copy_constructible_v<E> and
+  equality_comparable<E> and
+  (executable_invocable<E,T> or executable_receiver<E,T>)
+;
+
+
+} // end detail
+
+
+struct invocable_archetype
+{
+  void operator()() noexcept;
+};
+
+template<class E>
+concept executor = detail::executor_of_impl<E, invocable_archetype>;
+
+template<class E, class F>
+concept executor_of = executor<E> and detail::executor_of_impl<E, F>;
+
+
+namespace detail
+{
+
+
+template<class O>
+concept has_start_member_function = requires(O&& o) { std::forward<O>(o).start(); };
+
+template<class O>
+concept has_start_free_function = requires(O&& o) { start(std::forward<O>(o)); };
+
+struct start_t
+{
+  template<class O>
+    requires has_start_member_function<O&&>
+  constexpr auto operator()(O&& o) const noexcept(noexcept(std::forward<O>(o).start()))
+  {
+    return std::forward<O>(o).start();
+  }
+
+  template<class O>
+    requires (!has_start_member_function<O&&> and has_start_free_function<O&&>)
+  constexpr auto operator()(O&& o) const noexcept(noexcept(start(std::forward<O>(o))))
+  {
+    return start(std::forward<O>(o));
+  }
+};
+
+
+} // end detail
+
+
+constexpr detail::start_t start{};
+
+
+template<class O>
+concept operation_state =
+  destructible<O> and
+  std::is_object_v<O> and
+  requires(O& o)
+  {
+    { execution::start(o) } noexcept;
+  }
 ;
 
 
@@ -506,59 +682,9 @@ class as_sender
       Ex ex_;
       receiver_type r_;
 
-      struct as_invocable
-      {
-        std::optional<receiver_type> r_;
-
-        as_invocable(receiver_type&& r)
-          : r_{std::move(r)}
-        {}
-
-        as_invocable(as_invocable&& other) noexcept
-          : r_{std::move(other.r_)}
-        {
-          other.r_.reset();
-        }
-
-        ~as_invocable()
-        {
-          if(r_)
-          {
-            execution::set_done(std::move(*r_));
-          }
-        }
-
-        template<class E>
-        void set_error(E&& e) & noexcept
-        {
-          execution::set_error(std::move(*r_), std::forward<E>(e));
-          r_.reset();
-        }
-
-        void operator()() & noexcept
-        {
-          try
-          {
-            execution::set_value(std::move(*r_));
-            r_.reset();
-          }
-          catch(...)
-          {
-            set_error(std::current_exception());
-          }
-        }
-      };
-
       void start() noexcept
       {
-        try
-        {
-          execution::execute(ex_, as_invocable{std::move(r_)});
-        }
-        catch(...)
-        {
-          execution::set_error(std::move(r_), std::current_exception());
-        }
+        execution::execute(ex_, std::move(r_));
       }
     };
 
