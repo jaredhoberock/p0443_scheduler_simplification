@@ -4,7 +4,7 @@ The purpose of this repository is to illustrate a proposal to simplify the execu
 
 The proposed change is similar to a previous simplification which eliminated the concept `bulk_executor` while retaining the functionality of `bulk_execute`.
 
-Currently, concepts `executor` and `scheduler` are "peers". Both are usable with `execution::execute` and `execution::schedule`. This results in dependency cycles between `execute` and `schedule`, complicating the design and implementation of P0443.
+Currently, concepts `executor` and `scheduler` are "peers". Both are usable with `execution::execute` and `execution::schedule`. This results in dependency cycles between `execute` and `schedule`, complicating the design and implementation of P0443. Additionally, `executor`s lack a channel for "scheduling" errors, which happen between `execution::execute` and the eventual invocation of the user function.
 
 Proposal Summary:
 * Allow `executor`s to optionally `execute` `receiver`s of `void` directly, in addition to nullary `invocable`s. Executors which natively `execute` a `receiver` must fulfill the `receiver` contract.
