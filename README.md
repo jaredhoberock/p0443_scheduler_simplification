@@ -12,6 +12,8 @@ Proposal Summary:
 * When executing an `invocable`, normatively encourage `executor`s to report errors and cancellation to the invocable via `execution::set_error` and `execution::set_done`, thus providing optional error reporting channels executors currently lack.
 * Eliminate `scheduler`. `execution::scheduler` works exactly as before, but accepts an `executor`.
 
+These changes simplify the implementation and use of P0443. To view the simplification, compare `demo.cpp` and `execution.hpp` in the `master` and `proposed` branches of this repository.
+
 ~~~~
 
 Before:
