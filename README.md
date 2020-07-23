@@ -14,7 +14,7 @@ Proposal Summary:
 
 These changes simplify the implementation and use of P0443. To view the simplification, compare `demo.cpp` and `execution.hpp` in the `master` and `proposed` branches of this repository.
 
-~~~~
+-----
 
 Before:
 
