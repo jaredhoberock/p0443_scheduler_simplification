@@ -97,8 +97,12 @@ int main()
   //  auto ex = ctx.executor();
 
   //  // ERROR: treat the executor like a sender of void
-  //  // this is no longer allowed
+  //  // this is no longer allowed:
   //  execution::submit(ex, my_receiver{});
+  //
+  //  moreover, it is not necessary because it is equivalent to
+  // 
+  //     execution::execute(ex, my_receiver{})
   //}
 
   return 0;
